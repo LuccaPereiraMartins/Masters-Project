@@ -1,703 +1,265 @@
-# Continuous function with linear correlation
+"""
+Multi-Fidelity Neural Network Modeling Pipeline
+Refactored for simplicity, readability, and reduced duplication
+"""
 
-
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.neural_network import MLPRegressor
-from sklearn.metrics import mean_squared_error, median_absolute_error
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import random
 import matplotlib.pyplot as plt
+import random
+from sklearn.neural_network import MLPRegressor
+from sklearn.metrics import mean_squared_error
 
+# Set random seed for reproducibility
 random.seed(1)
+np.random.seed(1)
 
-def highfid(x):
-    return ((((6*x) - 2)**2) * np.sin((12*x) -4))
-
-
-def lowfid(A,B,C,x):
-    return ((A*(((6*x) - 2)**2) * np.sin((12*x) -4)) + B*(x-0.5) + C)
-
-
-
-
-def gen_data():
-
-    Xlow = np.linspace(0,1.5,20)
-    Xmed = np.linspace(0,1.5,10)
-    Xhigh = np.linspace(0,1.5,5)
-
-    yhigh, ylow, ymed = [],[],[]
-    for entry in Xhigh: yhigh.append(highfid(entry))
-    for entry in Xlow: ylow.append(lowfid(x=entry,A=0.5,B=10,C=-5))
-    for entry in Xmed: ymed.append(lowfid(x=entry,A=0.8,B=2,C=-1))
-
-    #plt.scatter(Xhigh,yhigh,c='g'),plt.scatter(Xmed,ymed,c='orange'),plt.scatter(Xlow,ylow,c='r')
-    #plt.legend(['High Fidelity function','Medium Fidelity function','Low Fidelity function',
-    #            'High Fidelity data','Medium Fidelity data','Low Fidelity data'])
-
-    return [Xlow,Xmed,Xhigh,ylow,ymed,yhigh]
-
-#plot_fidelities(),gen_data()
-#plt.show()
-
-pXlow,pXmed,pXhigh,pylow,pymed,pyhigh = gen_data()
+class MultiFidelityPipeline:
+    """Main pipeline for multi-fidelity modeling experiments"""
     
-def plot_fidelities():
-
-    x = np.linspace(0,2,1000)
-
-    yhigh, ylow, ymid = [],[],[]
-
-    for entry in x: 
-        yhigh.append(highfid(entry))
-        ylow.append(lowfid(x=entry,A=0.5,B=10,C=-5))
-        ymid.append(lowfid(x=entry,A=0.8,B=2,C=-1))
-
-    plt.plot(x,yhigh,c='r',alpha=0.8)
-    plt.plot(x,ymid,c='orange',alpha=0.8)
-    plt.plot(x,ylow,c='pink',alpha=0.8)
-
-    plt.scatter(pXlow,pylow,s=10,c='pink',alpha=0.5)
-    plt.scatter(pXmed,pymed,s=10,c='orange',alpha=0.5)
-    plt.scatter(pXhigh,pyhigh,c='r',s=10,alpha=0.5)
-
-    plt.xlabel('X'),plt.ylabel('y')
-    plt.grid(visible=True, which='major', axis='both')
-    plt.xlim(-0.1,1.6)  
-    plt.legend([r'$y_{L}$',r'$y_{M}$',r'$y_{H}$',r'$D_{L}$',r'$D_{M}$',r'$D_{H}$'])
-    ax=plt.gca()
-    ax.set_facecolor((0.95,0.95,0.95))
-    plt.show()   
-
-
-plot_fidelities()
-
-def model(xtrain,ytrain,n):
-
-    MLPregr = MLPRegressor(random_state=1,          
-                    hidden_layer_sizes=n,           #a robust choice of network
-                    activation='logistic',          #consider tanh and sigmoid functions too, for non-linearity in networks with 2+ hidden layers
-                    solver = 'adam',            
-                    batch_size='auto',
-                    early_stopping=False,
-                    learning_rate='adaptive',
-                    tol=1e-4,
-                    max_iter=10000).fit(xtrain,ytrain)
-
-    return MLPregr 
-
-data = gen_data()
-scaler = StandardScaler() 
-
-def low():
-    # Generate tests samples between [0,1.5]
-    samples,xtest = 10,[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5))
-    xtest = sorted(xtest)
-    xtest = np.array(xtest).reshape(len(xtest),1)
-
-    # Access training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Create low model, 3 hidden layers
-    mlow = model(X,y,(20,15,10))
-
-    # Predict and evaluate on test samples
-    ystarlow = MLPRegressor.predict(mlow,xtest)
-    yreal = []
-    for x in xtest: yreal.append(highfid(x))
-
-    ystarlow = ystarlow.reshape((len(ystarlow),1))
-    yreal = np.array(yreal).reshape(len(yreal),1)
-
-    mse_all = []
-    for index,entry in enumerate(yreal):
-        mse_all.append(mean_squared_error(entry,ystarlow[index]))
+    def __init__(self):
+        self.data = self._generate_data()
+        
+    @staticmethod
+    def high_fidelity_func(x):
+        """High fidelity function: ((6x-2)^2 * sin(12x-4))"""
+        return ((6*x - 2)**2) * np.sin(12*x - 4)
     
-    mse_avg = np.mean(mse_all)
-    r2 = mlow.score(xtest,yreal)
-    print(round(mse_avg,5),round(r2,5))
-
-    # Use more values to plot real and predicted functions
-    xfull = np.linspace(0,2,1000)
-    xfull = xfull.reshape(len(xfull),1)
-    yrealfull = [highfid(x) for x in xfull]
-    ystarlowfull = MLPRegressor.predict(mlow,xfull)
-
-    # Define the MSE of prediction
-    M = [float((y-ystarlowfull[x])**2) for x,y in enumerate(yrealfull)]
-    dyfitfull = [2 * np.sqrt(x) for x in M]
-
-    # Create the 2 S.D.s envelope (95% error margin)
-    ydynplus = [float(x+y) for x,y in zip(yrealfull,dyfitfull)]
-    ydynmin = [float(x-y) for x,y in zip(yrealfull,dyfitfull)]
-
-    # Plot training data
-    plt.scatter(X,y,s=10,c='r')
-
-    # Plot real and predicted function
-    plt.plot(xfull,yrealfull,c='g')
-    plt.plot(xfull,ystarlowfull,c='b')
-
-    # Plot uncertainty envelope of predicted function
+    @staticmethod
+    def low_fidelity_func(x, A=0.5, B=10, C=-5):
+        """Low fidelity function with parameters A, B, C"""
+        return A * MultiFidelityPipeline.high_fidelity_func(x) + B*(x-0.5) + C
     
-    # plt.fill_between(np.ravel(xfull), ydynplus, ydynmin,
-    #             color='gray', alpha=0.2)
-
-    # Labels & extras
-    plt.xlabel('X'),plt.ylabel('y'),plt.grid(True)
-    plt.legend(['Low-fidelity training data','True distribution','Low-fidelity model output','95% error margin'])
-    plt.show()
-
-#low()
-
-def MSE(model,xtest):
-    # Predict and evaluate on test samples
-    ystarlow = MLPRegressor.predict(model,xtest)
-    yreal = []
-    for x in xtest: yreal.append(highfid(x))
-
-    ystarlow = ystarlow.reshape((len(ystarlow),1))
-    yreal = np.array(yreal).reshape(len(yreal),1)
-
-    mse_all = []
-    for index,entry in enumerate(yreal):
-        mse_all.append(mean_squared_error(entry,ystarlow[index]))
+    def _generate_data(self):
+        """Generate training data for all fidelity levels"""
+        X_low = np.linspace(0, 1.5, 20)
+        X_med = np.linspace(0, 1.5, 10) 
+        X_high = np.linspace(0, 1.5, 5)
+        
+        y_high = [self.high_fidelity_func(x) for x in X_high]
+        y_med = [self.low_fidelity_func(x, A=0.8, B=2, C=-1) for x in X_med]
+        y_low = [self.low_fidelity_func(x) for x in X_low]
+        
+        return {
+            'X_low': X_low, 'X_med': X_med, 'X_high': X_high,
+            'y_low': y_low, 'y_med': y_med, 'y_high': y_high
+        }
     
-    mse_avg = np.mean(mse_all)
-    r2 = model.score(xtest,yreal)
-    return(round(mse_avg,5),round(r2,5))
-   
-def BFWL():
-    # Same as low()
-    # Generate tests samples between [0,1.5]
-    samples,xtest = 10,[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5))
-    xtest = sorted(xtest)
-    xtest = np.array(xtest).reshape(len(xtest),1)
-
-    # Access training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Get medium-fidelity data
-    Xmed, ymed = np.array(data[1]),np.array(data[4])
-    Xmed, ymed = Xmed.reshape(len(Xmed),1), ymed.reshape(len(ymed),1)
-    ymed = np.ravel(ymed)
-
-    # Create low model, 3 hidden layers
-    mlow = model(X,y,(20,15,10))
-
-    # Get MSE and R2 (low)
-    MSElow = MSE(mlow,xtest)
-
-    # Partial fit model with medium-fidelity data
-    iterations = 1
-    for i in range(iterations):
-        mlow.partial_fit(Xmed,ymed)
-
-    # Get MSE and R2 (bu-fidelity)
-    MSEmed = MSE(mlow,xtest)
-
-    print(MSElow,MSEmed)
-
-def BFWLiterated():
-    # Same as low()
-    # Generate tests samples between [0,1.5]
-    samples,xtest = 10,[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5))
-    xtest = sorted(xtest)
-    xtest = np.array(xtest).reshape(len(xtest),1)
-
-    # Access training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Get medium-fidelity data
-    Xmed, ymed = np.array(data[1]),np.array(data[4])
-    Xmed, ymed = Xmed.reshape(len(Xmed),1), ymed.reshape(len(ymed),1)
-    ymed = np.ravel(ymed)
-
-    # Create low model, 3 hidden layers
-    mlow = model(X,y,(20,15,10))
-    mmed = model(X,y,(20,15,10))
-
-    # Partial fit model with medium-fidelity data over iterations
-    MSEall = []
-    iterations = 20
-    for i in range(iterations):
-        mmed.partial_fit(Xmed,ymed)
-
-        # Append iteration MSE
-        MSEall.append(MSE(mmed,xtest)[0])
-
-    #plt.plot(MSEall),plt.xlabel('X'),plt.ylabel('MSE'),plt.title('MSE of BWFL model against iteration cycles')
-    #plt.show()
-
-    # Use more values to plot real and predicted functions
-    xfull = np.linspace(0,2,1000)
-    xfull = xfull.reshape(len(xfull),1)
-    yrealfull = [highfid(x) for x in xfull]
-    ystarlowfull = MLPRegressor.predict(mlow,xfull)
-    ystarmedfull = MLPRegressor.predict(mmed,xfull)
-
-    # Define the MSE of prediction
-    M = [float((y-ystarmedfull[x])**2) for x,y in enumerate(yrealfull)]
-    dyfitfull = [2 * np.sqrt(x) for x in M]
-
-    # Create the 2 S.D.s envelope (95% error margin)
-    ydynplus = [float(x+y) for x,y in zip(yrealfull,dyfitfull)]
-    ydynmin = [float(x-y) for x,y in zip(yrealfull,dyfitfull)]
-
-    # Plot training data
-    plt.scatter(X,y,s=10,c='r')
-    plt.scatter(Xmed,ymed,s=10,c='orange')
-
-    # Plot real and predicted function
-    plt.plot(xfull,yrealfull,c='g')
-    plt.plot(xfull,ystarlowfull,c='r')
-    plt.plot(xfull,ystarmedfull,c='b')
-
-    # Plot uncertainty envelope of predicted function
+    def create_model(self, hidden_layers=(20, 15, 10), activation='logistic'):
+        """Create MLPRegressor with standard parameters"""
+        return MLPRegressor(
+            random_state=1,
+            hidden_layer_sizes=hidden_layers,
+            activation=activation,
+            solver='adam',
+            learning_rate='adaptive',
+            tol=1e-4,
+            max_iter=30000
+        )
     
-    plt.fill_between(np.ravel(xfull), ydynplus, ydynmin,
-                color='gray', alpha=0.2)
-
-    # Labels & extras
-    plt.xlabel('X'),plt.ylabel('y'),plt.grid(True)
-    plt.legend(['Low-fidelity training data','Medium-fidelity training data','True distribution','Low-fidelity model output','Medium-fidelity model output','95% error margin'])
-    plt.xlim=1.5
-    plt.show()
+    def prepare_data(self, X, y):
+        """Prepare data for training (reshape and flatten as needed)"""
+        X = np.array(X).reshape(-1, 1)
+        y = np.ravel(y)
+        return X, y
     
-    # After many iterations, it almost entirely dismisses the low-fidelity data and fits only to the medium-fidelity training set.
-    # Only where medium-fidelity data exists, else no changes 
-
-def MFWL():
-    # Generate tests samples between [0,1.5] and ones between [1.5,2.0]
-    samples,xtest,xtestextra = 20,[],[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5)), xtestextra.append(random.uniform(1.5,2.0))
-    xtest = np.array(sorted(xtest)).reshape(len(xtest),1)
-    xtestextra = np.array(sorted(xtestextra)).reshape(len(xtestextra),1)
-
-    # Access training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Get medium-fidelity data
-    Xmed, ymed = np.array(data[1]),np.array(data[4])
-    Xmed, ymed = Xmed.reshape(len(Xmed),1), ymed.reshape(len(ymed),1)
-    ymed = np.ravel(ymed)
-
-    # Get high-fidelity data
-    Xhgh, yhgh = np.array(data[2]),np.array(data[5])
-    Xhgh, yhgh = Xhgh.reshape(len(Xhgh),1), yhgh.reshape(len(yhgh),1)
-    yhgh = np.ravel(yhgh)
-
-    # Create low and high models, 3 hidden layers
-    mlow = model(X,y,(20,15,10))
-    mmed = model(X,y,(20,15,10))
-    mhigh = model(X,y,(20,15,10))
-
-    # Partial fit model with medium-fidelity then high-fidelity data over iterations
-    iterations = 10
-    for i in range(iterations): mhigh.partial_fit(Xmed,ymed), mmed.partial_fit(Xmed,ymed)
-    for i in range(iterations): mhigh.partial_fit(Xhgh,yhgh)
-
-    # Find errors against test data
-    errors = [MSE(mlow,xtest),MSE(mmed,xtest),MSE(mhigh,xtest)]
-    # print(pd.DataFrame(errors))
-
-    # # Find errors when predicting out of range 
-    # # (terrible values, shows it hasn't really learnt the function, only how to fit the data)
-    # print(MSE(mhigh,xtestextra))
-
-    # Use more values to plot real and predicted functions
-    xfull = np.linspace(0,1.5,1000)
-    xfull = xfull.reshape(len(xfull),1)
-    yrealfull = [highfid(x) for x in xfull]
-    ystarlowfull = MLPRegressor.predict(mlow,xfull)
-    ystarmedfull = MLPRegressor.predict(mmed,xfull)
-    ystarhighfull = MLPRegressor.predict(mhigh,xfull)
-
-    # Define the MSE of prediction
-    M = [float((y-ystarhighfull[x])**2) for x,y in enumerate(yrealfull)]
-    m = np.sqrt(np.mean(M))
-    dyfitfull = [np.sqrt(x) for x in M]
-
-    # Create the MAE envelope evaluated at each point
-    # Indicates where the model struggles most
-    ydynplus = [float(x+y) for x,y in zip(yrealfull,dyfitfull)]
-    ydynmin = [float(x-y) for x,y in zip(yrealfull,dyfitfull)]
-
-    # # Plot training data
-    # plt.scatter(X,y,s=10,c='r')
-    # plt.scatter(Xmed,ymed,s=10,c='orange')
-    # plt.scatter(Xhgh,yhgh,c='g',s=10)
-
-    # # Plot real and predicted function
-    # plt.plot(xfull,yrealfull,c='g')
-    # plt.plot(xfull,ystarlowfull,c='r')
-    # plt.plot(xfull,ystarmedfull,c='orange')
-    # plt.plot(xfull,ystarhighfull,c='b')
-
-    # # Plot uncertainty envelope of predicted function
-    # plt.fill_between(np.ravel(xfull), ydynplus, ydynmin,
-    #             color='gray', alpha=0.2)
-
-    # # Labels & extras
-    # plt.xlabel('X'),plt.ylabel('y'),plt.grid(True)
-    # plt.legend(['Low-fidelity training data','Medium-fidelity training data','High-fidelity training data',
-    #             'True distribution','Low-fidelity model output','Medium-fidelity model output','High-fidelity output',
-    #             '95% error margin'])
+    def generate_test_data(self, n_samples=20, x_range=(0, 1.5)):
+        """Generate random test samples"""
+        x_test = [random.uniform(*x_range) for _ in range(n_samples)]
+        x_test = np.array(sorted(x_test)).reshape(-1, 1)
+        y_test = np.array([self.high_fidelity_func(x) for x in x_test.flatten()])
+        return x_test, y_test
     
-    # # plt.show()
-
-    return ystarhighfull
-
-
-
-def BFPM():
-    # Generate tests samples between [0,1.5] and ones between [1.5,2.0]
-    samples,xtest,xtestextra = 20,[],[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5)), xtestextra.append(random.uniform(1.5,2.0))
-    xtest = np.array(sorted(xtest)).reshape(len(xtest),1)
-    xtestextra = np.array(sorted(xtestextra)).reshape(len(xtestextra),1)
-
-    # Generate real y values for xtest
-    yreal = []
-    for x in xtest: yreal.append(highfid(x))
-    yreal = np.array(yreal).reshape(len(yreal),1)
-
-    # Access low-fidelity training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Get medium-fidelity data
-    Xmed, ymed = np.array(data[1]),np.array(data[4])
-    Xmed, ymed = Xmed.reshape(len(Xmed),1), ymed.reshape(len(ymed),1)
-    ymed = np.ravel(ymed)
-
-    # Create low-fidelity model
-    mlow = model(X,y,(20,15,10))
-
-    # Pass medium-fidelity inputs through low-fidelity model
-    yl = MLPRegressor.predict(mlow,Xmed)
-    yltest = MLPRegressor.predict(mlow,xtest)
-
-    # Stack predictions with rest of training data
-    Xh = np.hstack((Xmed,yl.reshape(len(yl),1)))
-    Xhtest = np.hstack((xtest,yltest.reshape(len(yltest),1)))
-
-    # Define new model with stacked input
-    mmed = model(Xh,ymed,(20,15,10))
+    def evaluate_model(self, model, X_test, y_test):
+        """Evaluate model performance with MSE and R²"""
+        y_pred = model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        r2 = model.score(X_test, y_test)
+        return round(mse, 5), round(r2, 5)
     
-    # Predict outputs of test data (requires passing it through low-fidelity network first)
-    ymtest = MLPRegressor.predict(mmed,Xhtest)
+    def plot_fidelities(self):
+        """Plot all fidelity functions and training data"""
+        x = np.linspace(0, 2, 1000)
+        
+        y_high = [self.high_fidelity_func(xi) for xi in x]
+        y_med = [self.low_fidelity_func(xi, A=0.8, B=2, C=-1) for xi in x]
+        y_low = [self.low_fidelity_func(xi) for xi in x]
+        
+        plt.figure(figsize=(10, 6))
+        
+        # Plot functions
+        plt.plot(x, y_high, 'r-', alpha=0.8, label=r'$y_H$')
+        plt.plot(x, y_med, 'orange', alpha=0.8, label=r'$y_M$')
+        plt.plot(x, y_low, 'pink', alpha=0.8, label=r'$y_L$')
+        
+        # Plot training data
+        plt.scatter(self.data['X_high'], self.data['y_high'], c='red', s=10, alpha=0.7, label=r'$D_H$')
+        plt.scatter(self.data['X_med'], self.data['y_med'], c='orange', s=10, alpha=0.7, label=r'$D_M$')
+        plt.scatter(self.data['X_low'], self.data['y_low'], c='pink', s=10, alpha=0.7, label=r'$D_L$')
+        
+        plt.xlabel('X')
+        plt.ylabel('y')
+        plt.grid(True, alpha=0.3)
+        plt.xlim(-0.1, 1.6)
+        plt.legend()
+        plt.gca().set_facecolor((0.95, 0.95, 0.95))
+        plt.title('Multi-Fidelity Functions and Training Data')
+        plt.show()
 
-    # Define errors
-    MSE = mean_squared_error(ymtest,yreal)
-    R2 = mmed.score(Xhtest,yreal)
-    # print(round(MSE,5),round(R2,5))
-
-    # Use more values to plot real and predicted functions
-    xfull = np.linspace(0,1.5,1000)
-    xfull = xfull.reshape(len(xfull),1)
-    yrealfull = [highfid(x) for x in xfull]
-    ymedfull = [lowfid(0.8,2,-1,x) for x in xfull]
-
-    # Pass xfull through mlow then stack to inputs of med-fid. network
-    ylfull = MLPRegressor.predict(mlow,xfull)
-    Xhfull = np.hstack((xfull,ylfull.reshape(len(ylfull),1)))
-    ystarmedfull = MLPRegressor.predict(mmed,Xhfull)
-
-    # Define the MSE of prediction
-    M = [float((y-ystarmedfull[x])**2) for x,y in enumerate(yrealfull)]
-    dyfitfull = [2 * np.sqrt(x) for x in M]
-
-    # Create the 2 S.D.s envelope (95% error margin)
-    ydynplus = [float(x+y) for x,y in zip(yrealfull,dyfitfull)]
-    ydynmin = [float(x-y) for x,y in zip(yrealfull,dyfitfull)]
-
-    # # Plot training data
-    # plt.scatter(X,y,s=10,c='r')
-    # plt.scatter(Xmed,ymed,s=10,c='orange')
-
-    # # Plot real and predicted function
-    # plt.plot(xfull,yrealfull,c='g')
-    # plt.plot(xfull,ylfull,c='r')
-    # plt.plot(xfull,ystarmedfull,c='orange')
-
-    # # Plot uncertainty envelope of predicted function
-    # plt.fill_between(np.ravel(xfull), ydynplus, ydynmin,
-    #             color='gray', alpha=0.2)
+class MultiFidelityModels:
+    """Container for different multi-fidelity modeling approaches"""
     
-    # # Labels & extras
-    # plt.xlabel('X'),plt.ylabel('y'),plt.grid(True)
-    # plt.legend(['Low-fidelity training data','Medium-fidelity training data',
-    #             'True distribution','Low-fidelity model output','Medium-fidelity model output',
-    #             '95% error margin'])
-    # plt.show()
-
-def MFPM():
-    # Generate tests samples between [0,1.5] and ones between [1.5,2.0]
-    samples,xtest,xtestextra = 20,[],[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5)), xtestextra.append(random.uniform(1.5,2.0))
-    xtest = np.array(sorted(xtest)).reshape(len(xtest),1)
-    xtestextra = np.array(sorted(xtestextra)).reshape(len(xtestextra),1)
-
-    # Generate real y values for xtest
-    yreal = []
-    for x in xtest: yreal.append(highfid(x))
-    yreal = np.array(yreal).reshape(len(yreal),1)
-
-    # Access low-fidelity training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Get medium-fidelity data
-    Xmed, ymed = np.array(data[1]),np.array(data[4])
-    Xmed, ymed = Xmed.reshape(len(Xmed),1), ymed.reshape(len(ymed),1)
-    ymed = np.ravel(ymed)
-
-    # Get high-fidelity data
-    Xhigh, yhgh = np.array(data[2]),np.array(data[5])
-    Xhigh, yhgh = Xhigh.reshape(len(Xhigh),1), yhgh.reshape(len(yhgh),1)
-    yhgh = np.ravel(yhgh)  
-
-    # Create low-fidelity model
-    mlow = model(X,y,(20,15,10))  
-
-    # Pass medium-fidelity inputs through low-fidelity model
-    yl = MLPRegressor.predict(mlow,Xmed)
-    ylh = MLPRegressor.predict(mlow,Xhigh)
-    yltest = MLPRegressor.predict(mlow,xtest)
-
-    # Stack predictions with rest of training data
-    Xm = np.hstack((Xmed,yl.reshape(len(yl),1)))
-    Xmtest = np.hstack((xtest,yltest.reshape(len(yltest),1)))
-
-    # Define new model with stacked input
-    mmed = model(Xm,ymed,(10,10))
-
-    # Pass high-fidelity inputs through medium-fidelity model
-    Xhgh = np.hstack((Xhigh,ylh.reshape(len(ylh),1)))
-    ymh = MLPRegressor.predict(mmed,Xhgh)
-    ymtest = MLPRegressor.predict(mmed,Xmtest)
-
-    # Stack predictions with rest of training data
-    Xh = np.hstack((Xhgh,ymh.reshape(len(ymh),1)))
-    Xhtest = np.hstack((Xmtest,ymtest.reshape(len(yltest),1)))
-
-    # Define high-fidelity model with stacked input
-    # mhigh = model(Xh,yhgh,(2))
-
-    # Try altering hyperparameters other than network size
-    mhigh = MLPRegressor(
-                    random_state=1,          # manipulate results by picking a random state that shows an improvement from both to multi
-                    hidden_layer_sizes=10,           #a robust choice of network
-                    activation='relu',          #consider tanh and sigmoid functions too, for non-linearity in networks with 2+ hidden layers
-                    solver = 'adam',            
-                    batch_size='auto',
-                    early_stopping=False,
-                    learning_rate='adaptive',
-                    tol=1e-4,
-                    max_iter=10000).fit(Xh,yhgh)
-
-    # Predict outputs of test data (requires passing first through low- and med- fidelity networks)
-    yhghtest = MLPRegressor.predict(mhigh,Xhtest)
-
-    # Define errors
-    MSE = mean_squared_error(yhghtest,yreal)
-    R2 = mhigh.score(Xhtest,yreal)
-    print(round(MSE,5),round(R2,5))
-
-    # Use more values to plot real and predicted functions
-    xfull = np.linspace(0,1.5,1000)
-    xfull = xfull.reshape(len(xfull),1)
-    yrealfull = [highfid(x) for x in xfull]
-
-    # Pass xfull through mlow then stack to inputs of med-fid. network
-    ylfull = MLPRegressor.predict(mlow,xfull)
-    Xmfull = np.hstack((xfull,ylfull.reshape(len(ylfull),1)))
-    ystarmedfull = MLPRegressor.predict(mmed,Xmfull)
-
-    # Pass xfull through mmed then stack to inputs of high-fid. network
-    Xhfull = np.hstack((Xmfull,ystarmedfull.reshape(len(ystarmedfull),1)))
-    ystarhighfull = MLPRegressor.predict(mhigh,Xhfull)
-
-    # Plot training data
-    plt.scatter(X,y,s=10,c='r')
-    plt.scatter(Xmed,ymed,s=10,c='orange')
-    plt.scatter(Xhigh,yhgh,c='g',s=10)
-
-    # Plot real and predicted function
-    plt.plot(xfull,yrealfull,c='g')
-    plt.plot(xfull,ystarmedfull,c='orange')
-    plt.plot(xfull,ystarhighfull,c='b')
-
-    # Labels & extras
-    plt.xlabel('X'),plt.ylabel('y'),plt.grid(True)
-    plt.legend(['Low-fidelity training data','Medium-fidelity training data','High-fidelity training data',
-                'True distribution','Medium-fidelity model output','High-fidelity model output'])
+    def __init__(self, pipeline):
+        self.pipeline = pipeline
+        self.data = pipeline.data
     
-    plt.show()   
-
-#MFPM()
-
-# MFPM testing
-#          MSE       R2
-#Low  76.94256  0.46368
-#Med  39.39119  0.69898
-#Hgh  12.13988  0.90723 (n1 = (20,10,5), n2 = (10,10), n3 = (10), activation = 'relu' to exploit linear relationship, solver = 'adam')
-#Hgh2 10.62131  0.91883 (only using the most recent prediction, hence not stacking all prior predictions)
-
-# MFWL testing
-#          MSE       R2
-#Low  76.94256  0.46368
-#Med  57.92904  0.59622
-#Hgh  43.61856  0.69596
-
-# Important takeaway from MFPM is that each network's hyperparameters must be optimised
+    def single_fidelity(self, fidelity='low'):
+        """Train model on single fidelity data"""
+        X, y = self.pipeline.prepare_data(
+            self.data[f'X_{fidelity}'], 
+            self.data[f'y_{fidelity}']
+        )
+        
+        model = self.pipeline.create_model()
+        model.fit(X, y)
+        
+        X_test, y_test = self.pipeline.generate_test_data()
+        mse, r2 = self.pipeline.evaluate_model(model, X_test, y_test)
+        
+        print(f"{fidelity.capitalize()} fidelity - MSE: {mse}, R²: {r2}")
+        return model
     
-def MFPM2():
-    # Generate tests samples between [0,1.5] and ones between [1.5,2.0]
-    samples,xtest,xtestextra = 20,[],[]
-    for sample in range(samples): xtest.append(random.uniform(0,1.5)), xtestextra.append(random.uniform(1.5,2.0))
-    xtest = np.array(sorted(xtest)).reshape(len(xtest),1)
-    xtestextra = np.array(sorted(xtestextra)).reshape(len(xtestextra),1)
-
-    # Generate real y values for xtest
-    yreal = []
-    for x in xtest: yreal.append(highfid(x))
-    yreal = np.array(yreal).reshape(len(yreal),1)
-
-    # Access low-fidelity training data
-    X,y = np.array(data[0]),np.array(data[3])
-    X,y = X.reshape(len(X),1),y.reshape(len(y),1)
-    y=np.ravel(y)
-
-    # Get medium-fidelity data
-    Xmed, ymed = np.array(data[1]),np.array(data[4])
-    Xmed, ymed = Xmed.reshape(len(Xmed),1), ymed.reshape(len(ymed),1)
-    ymed = np.ravel(ymed)
-
-    # Get high-fidelity data
-    Xhigh, yhgh = np.array(data[2]),np.array(data[5])
-    Xhigh, yhgh = Xhigh.reshape(len(Xhigh),1), yhgh.reshape(len(yhgh),1)
-    yhgh = np.ravel(yhgh)  
-
-    # Create low-fidelity model
-    mlow = model(X,y,(20,15,10))  
-
-    # Pass medium-fidelity inputs through low-fidelity model
-    yl = MLPRegressor.predict(mlow,Xmed)
-    ylh = MLPRegressor.predict(mlow,Xhigh)
-    yltest = MLPRegressor.predict(mlow,xtest)
-
-    # Stack predictions with rest of training data
-    Xm = np.hstack((Xmed,yl.reshape(len(yl),1)))
-    Xmtest = np.hstack((xtest,yltest.reshape(len(yltest),1)))
-
-    # Define new model with stacked input
-    mmed = model(Xm,ymed,(10,10))
-
-    # Pass high-fidelity inputs through medium-fidelity model
-    Xhgh = np.hstack((Xhigh,ylh.reshape(len(ylh),1)))
-    ymh = MLPRegressor.predict(mmed,Xhgh)
-    ymtest = MLPRegressor.predict(mmed,Xmtest)
-
-    # Stack predictions with rest of training data
-    Xh = np.hstack((Xhigh,ymh.reshape(len(ymh),1)))
-    Xhtest = np.hstack((xtest,ymtest.reshape(len(yltest),1)))
-
-    # Define high-fidelity model with stacked input
-    # mhigh = model(Xh,yhgh,(2))
-
-    # Try altering hyperparameters other than network size
-    mhigh = MLPRegressor(
-                    random_state=1,          # manipulate results by picking a random state that shows an improvement from both to multi
-                    hidden_layer_sizes=10,           #a robust choice of network
-                    activation='relu',          #consider tanh and sigmoid functions too, for non-linearity in networks with 2+ hidden layers
-                    solver = 'adam',            
-                    batch_size='auto',
-                    early_stopping=False,
-                    learning_rate='adaptive',
-                    tol=1e-4,
-                    max_iter=10000).fit(Xh,yhgh)
-
-    # Predict outputs of test data (requires passing first through low- and med- fidelity networks)
-    yhghtest = MLPRegressor.predict(mhigh,Xhtest)
-
-    # Define errors
-    MSE = mean_squared_error(yhghtest,yreal)
-    R2 = mhigh.score(Xhtest,yreal)
-    print(round(MSE,5),round(R2,5))
-
-    # Use more values to plot real and predicted functions
-    xfull = np.linspace(0,1.5,1000)
-    xfull = xfull.reshape(len(xfull),1)
-    yrealfull = [highfid(x) for x in xfull]
-
-    # Pass xfull through mlow then stack to inputs of med-fid. network
-    ylfull = MLPRegressor.predict(mlow,xfull)
-    Xmfull = np.hstack((xfull,ylfull.reshape(len(ylfull),1)))
-    ystarmedfull = MLPRegressor.predict(mmed,Xmfull)
-
-    # Pass xfull through mmed then stack to inputs of high-fid. network
-    Xhfull = np.hstack((xfull,ystarmedfull.reshape(len(ystarmedfull),1)))
-    ystarhighfull = MLPRegressor.predict(mhigh,Xhfull)
-
-    # # Plot training data
-    # plt.scatter(X,y,s=10,c='r')
-    # plt.scatter(Xmed,ymed,s=10,c='orange')
-    # plt.scatter(Xhigh,yhgh,c='g',s=10)
-
-    # # Plot real and predicted function
-    # plt.plot(xfull,yrealfull,c='g')
-    # plt.plot(xfull,ystarmedfull,c='orange')
-    # plt.plot(xfull,ystarhighfull,c='b')
-
-    # # Labels & extras
-    # plt.xlabel('X'),plt.ylabel('y'),plt.grid(True)
-    # plt.legend(['Low-fidelity training data','Medium-fidelity training data','High-fidelity training data',
-    #             'True distribution','Medium-fidelity model output','High-fidelity model output'])
+    def warm_learning(self, iterations=10):
+        """Multi-Fidelity Warm Learning: progressively add higher fidelity data"""
+        # Start with low fidelity
+        X_low, y_low = self.pipeline.prepare_data(self.data['X_low'], self.data['y_low'])
+        model = self.pipeline.create_model()
+        model.fit(X_low, y_low)
+        
+        X_test, y_test = self.pipeline.generate_test_data()
+        results = {'low': self.pipeline.evaluate_model(model, X_test, y_test)}
+        
+        # Add medium fidelity data
+        X_med, y_med = self.pipeline.prepare_data(self.data['X_med'], self.data['y_med'])
+        for _ in range(iterations):
+            model.partial_fit(X_med, y_med)
+        results['med'] = self.pipeline.evaluate_model(model, X_test, y_test)
+        
+        # Add high fidelity data
+        X_high, y_high = self.pipeline.prepare_data(self.data['X_high'], self.data['y_high'])
+        for _ in range(iterations):
+            model.partial_fit(X_high, y_high)
+        results['high'] = self.pipeline.evaluate_model(model, X_test, y_test)
+        
+        print("Warm Learning Results:")
+        for level, (mse, r2) in results.items():
+            print(f"  {level.capitalize()}: MSE={mse}, R²={r2}")
+        
+        return model, results
     
-    # plt.show()
+    def progressive_modeling(self):
+        """Multi-Fidelity Progressive Modeling: stack predictions from lower fidelities"""
+        X_test, y_test = self.pipeline.generate_test_data()
+        
+        # Train low fidelity model
+        X_low, y_low = self.pipeline.prepare_data(self.data['X_low'], self.data['y_low'])
+        model_low = self.pipeline.create_model()
+        model_low.fit(X_low, y_low)
+        
+        # Train medium fidelity model (stacked with low predictions)
+        X_med, y_med = self.pipeline.prepare_data(self.data['X_med'], self.data['y_med'])
+        y_low_pred = model_low.predict(X_med)
+        X_med_stacked = np.hstack([X_med, y_low_pred.reshape(-1, 1)])
+        
+        model_med = self.pipeline.create_model(hidden_layers=(10, 10))
+        model_med.fit(X_med_stacked, y_med)
+        
+        # Train high fidelity model (stacked with low and medium predictions)
+        X_high, y_high = self.pipeline.prepare_data(self.data['X_high'], self.data['y_high'])
+        y_low_high = model_low.predict(X_high)
+        X_high_with_low = np.hstack([X_high, y_low_high.reshape(-1, 1)])
+        y_med_high = model_med.predict(X_high_with_low)
+        X_high_stacked = np.hstack([X_high, y_med_high.reshape(-1, 1)])
+        
+        model_high = self.pipeline.create_model(hidden_layers=(10,), activation='relu')
+        model_high.fit(X_high_stacked, y_high)
+        
+        # Evaluate on test data
+        y_low_test = model_low.predict(X_test)
+        X_test_with_low = np.hstack([X_test, y_low_test.reshape(-1, 1)])
+        y_med_test = model_med.predict(X_test_with_low)
+        X_test_stacked = np.hstack([X_test, y_med_test.reshape(-1, 1)])
+        
+        mse, r2 = self.pipeline.evaluate_model(model_high, X_test_stacked, y_test)
+        print(f"Progressive Modeling - MSE: {mse}, R²: {r2}")
+        
+        return model_high, (model_low, model_med)
+    
+    def plot_comparison(self):
+        """Plot comparison of different modeling approaches"""
+        X_plot = np.linspace(0, 1.5, 1000).reshape(-1, 1)
+        y_true = [self.pipeline.high_fidelity_func(x) for x in X_plot.flatten()]
+        
+        # Get predictions from different models
+        model_low = self.single_fidelity('low')
+        model_wl, _ = self.warm_learning()
+        model_pm, (m_low, m_med) = self.progressive_modeling()
+        
+        y_low_pred = model_low.predict(X_plot)
+        y_wl_pred = model_wl.predict(X_plot)
+        
+        # Progressive model predictions require stacking
+        y_low_for_pm = m_low.predict(X_plot)
+        X_with_low = np.hstack([X_plot, y_low_for_pm.reshape(-1, 1)])
+        y_med_for_pm = m_med.predict(X_with_low)
+        X_stacked = np.hstack([X_plot, y_med_for_pm.reshape(-1, 1)])
+        y_pm_pred = model_pm.predict(X_stacked)
+        
+        plt.figure(figsize=(12, 8))
+        
+        # Plot training data
+        plt.scatter(self.data['X_low'], self.data['y_low'], c='pink', s=10, alpha=0.5, label=r'$D_L$')
+        plt.scatter(self.data['X_med'], self.data['y_med'], c='orange', s=10, alpha=0.5, label=r'$D_M$')
+        plt.scatter(self.data['X_high'], self.data['y_high'], c='green', s=10, alpha=0.5, label=r'$D_H$')
+        
+        # Plot functions and predictions
+        plt.plot(X_plot, y_true, 'r-', alpha=0.8, linewidth=2, label=r'$y_H$ (True)')
+        plt.plot(X_plot, y_low_pred, 'pink', alpha=0.7, linewidth=2, label=r'$M_L$')
+        plt.plot(X_plot, y_wl_pred, '--', color=(0.1, 0.1, 0.8), alpha=0.7, linewidth=2, label=r'$M_{H,WL}$')
+        plt.plot(X_plot, y_pm_pred, '--', color=(0.1, 0.5, 0.8), alpha=0.7, linewidth=2, label=r'$M_{H,PM}$')
+        
+        plt.xlabel('X')
+        plt.ylabel('y')
+        plt.grid(True, alpha=0.3)
+        plt.xlim(-0.1, 1.6)
+        plt.legend()
+        plt.gca().set_facecolor((0.95, 0.95, 0.95))
+        plt.title('Multi-Fidelity Model Comparison')
+        plt.show()
 
-    return [xfull,ylfull,yrealfull,ystarhighfull]
+def main():
+    """Main execution function"""
+    # Initialize pipeline
+    pipeline = MultiFidelityPipeline()
+    
+    # Show data visualization
+    pipeline.plot_fidelities()
+    
+    # Initialize models
+    models = MultiFidelityModels(pipeline)
+    
+    # Run different modeling approaches
+    print("=== Single Fidelity Models ===")
+    models.single_fidelity('low')
+    models.single_fidelity('med')
+    models.single_fidelity('high')
+    
+    print("\n=== Multi-Fidelity Approaches ===")
+    models.warm_learning()
+    models.progressive_modeling()
+    
+    # Show comparison plot
+    models.plot_comparison()
 
-
-mfwl = MFWL()
-[x,ylow,y,mfpm] = MFPM2()
-pXlow,pXmed,pXhigh,pylow,pymed,pyhigh = gen_data()
-
-def fig1():
-
-    plt.scatter(pXlow,pylow,s=10,c='pink',alpha=0.5)
-    plt.scatter(pXmed,pymed,s=10,c='orange',alpha=0.5)
-    plt.scatter(pXhigh,pyhigh,c='g',s=10,alpha=0.5)
-
-    plt.plot(x,y,c='r',alpha=0.8)
-    plt.plot(x,ylow,c='pink',alpha=0.7)
-    plt.plot(x,mfwl,'--',color=(0.1,0.1,0.8),alpha=0.7)
-    plt.plot(x,mfpm,'--',color=(0.1,0.5,0.8),alpha=0.7)
-
-    plt.xlabel('X'),plt.ylabel('y')
-    plt.grid(visible=True, which='major', axis='both')
-    plt.xlim(-0.1,1.6)  
-    plt.legend([r'$D_{L}$',r'$D_{M}$',r'$D_{H}$',r'$y_{H}$',r'$M_{L}$',r'$M_{H,WL}$',r'$M_{H,PM}$'])
-    ax=plt.gca()
-    ax.set_facecolor((0.95,0.95,0.95))
-    plt.show()      
-
-# fig1()
+if __name__ == "__main__":
+    main()
